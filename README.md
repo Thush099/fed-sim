@@ -76,6 +76,24 @@ Run a utility-oriented demo configuration (e.g., 4 clients, 6 rounds, Laplace DP
 python main.py --num-clients 4 --num-rounds 6 --epsilon 50.0
 ```
 
+### Simulation flags
+
+| Flag | Default | Meaning |
+|---|---:|---|
+| `--num-clients` | `5` | Number of federated clients |
+| `--num-rounds` | `10` | Number of communication rounds |
+| `--local-epochs` | `5` | Local SGD epochs per round |
+| `--lr` | `0.15` | Client SGD learning rate |
+| `--alpha` | `0.5` | Dirichlet concentration (low = non-IID, high = IID) |
+| `--dp-mechanism` | `laplace` | `laplace`, `gaussian`, or `none` |
+| `--epsilon` | `2.0` | Per-round DP budget epsilon |
+| `--delta` | `1e-5` | Privacy failure probability delta (Gaussian mechanism) |
+| `--clip-norm` | `1.0` | Per-client L2 update clipping threshold |
+| `--seed` | `42` | Random seed |
+
+All numeric flags must be finite: `nan`/`inf` values are rejected at startup instead
+of producing a run full of `nan` losses.
+
 Add `--min-accuracy FLOAT` to gate a CI job: the run exits non-zero when the final
 round's test accuracy falls below the threshold in `[0, 1]`, and an out-of-range
 threshold is rejected rather than silently disabling the gate:

@@ -20,7 +20,13 @@ from src.privacy import (
     compute_dp_noise_scale,
     tensor_dict_l2_norm,
 )
-from src.utils import dirichlet_partition, generate_federated_dataset
+from src.utils import (
+    compute_client_label_counts,
+    compute_label_skew,
+    dirichlet_partition,
+    generate_federated_dataset,
+    set_seed,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -424,3 +430,44 @@ class TestConfigNonFiniteRejection:
     def test_non_finite_epsilon_does_not_run_a_nan_simulation(self) -> None:
         with pytest.raises(ValueError, match="epsilon must be finite"):
             cli_main(["--num-clients", "2", "--num-rounds", "2", "--epsilon", "nan"])
+
+
+class TestLabelSkewUtilities:
+    def test_balanced_clients_have_zero_skew(self) -> None:
+        counts = np.array([[10, 10], [10, 10]])
+        assert compute_label_skew(counts) == pytest.approx(0.0)
+
+    def test_fully_skewed_two_class_clients_skew_half(self) -> None:
+        # Each client is point-mass on one class; global is uniform, so each
+        # client's TV distance to the global distribution is 0.5.
+        counts = np.array([[20, 0], [0, 20]])
+        assert compute_label_skew(counts) == pytest.approx(0.5)
+
+    def test_fully_skewed_three_class_clients_skew_two_thirds(self) -> None:
+        counts = np.eye(3) * 10.0
+        assert compute_label_skew(counts) == pytest.approx(2.0 / 3.0)
+
+    def test_empty_client_rows_are_skipped(self) -> None:
+        counts = np.array([[10, 10], [0, 0]])
+        assert compute_label_skew(counts) == pytest.approx(0.0)
+
+    def test_all_empty_clients_yield_zero(self) -> None:
+        assert compute_label_skew(np.zeros((3, 4))) == 0.0
+
+    def test_client_label_counts_shape_and_totals(self) -> None:
+        splits = [
+            (torch.zeros(5, 2), torch.tensor([0, 0, 1, 1, 1])),
+            (torch.zeros(4, 2), torch.tensor([1, 1, 1, 1])),
+        ]
+        counts = compute_client_label_counts(splits, num_classes=2)
+        assert counts.shape == (2, 2)
+        assert counts[0].tolist() == [2, 3]
+        assert counts[1].tolist() == [0, 4]
+
+    def test_set_seed_makes_torch_and_numpy_reproducible(self) -> None:
+        set_seed(123)
+        a = torch.randn(3).tolist()
+        b = np.random.rand(3).tolist()
+        set_seed(123)
+        assert torch.randn(3).tolist() == a
+        assert np.random.rand(3).tolist() == b
