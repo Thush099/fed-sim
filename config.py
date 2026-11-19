@@ -1,6 +1,7 @@
 """Configuration dataclasses for the federated learning simulator."""
 
 from dataclasses import dataclass
+import math
 from typing import Literal
 
 DPMechanism = Literal["laplace", "gaussian", "none"]
@@ -31,6 +32,18 @@ class SimulationConfig:
     seed: int = 42
 
     def __post_init__(self) -> None:
+        for name in (
+            "learning_rate",
+            "momentum",
+            "weight_decay",
+            "alpha",
+            "epsilon",
+            "delta",
+            "clip_norm",
+            "test_size",
+        ):
+            if not math.isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite, got {getattr(self, name)!r}")
         if self.num_clients < 1:
             raise ValueError(f"num_clients must be >= 1, got {self.num_clients}")
         if self.num_rounds < 1:

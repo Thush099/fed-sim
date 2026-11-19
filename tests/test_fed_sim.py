@@ -407,3 +407,20 @@ def test_cli_min_accuracy_gates_the_run() -> None:
     argv = ["--num-clients", "3", "--num-rounds", "3", "--local-epochs", "2", "--seed", "42"]
     assert cli_main(argv + ["--min-accuracy", "0.0"]) == 0
     assert cli_main(argv + ["--min-accuracy", "1.0"]) == 1
+
+
+class TestConfigNonFiniteRejection:
+    @pytest.mark.parametrize(
+        "field",
+        ["learning_rate", "momentum", "weight_decay", "alpha", "epsilon", "delta", "clip_norm", "test_size"],
+    )
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_config_values_fail_fast(self, field: str, bad: float) -> None:
+        from config import SimulationConfig
+
+        with pytest.raises(ValueError, match=f"{field} must be finite"):
+            SimulationConfig(**{field: bad})  # type: ignore[arg-type]
+
+    def test_non_finite_epsilon_does_not_run_a_nan_simulation(self) -> None:
+        with pytest.raises(ValueError, match="epsilon must be finite"):
+            cli_main(["--num-clients", "2", "--num-rounds", "2", "--epsilon", "nan"])
