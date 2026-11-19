@@ -37,10 +37,10 @@ A clean, modular PyTorch simulator for **Federated Averaging (FedAvg)** under **
 3. **Per-Client L2 Clipping & Calibrated DP** ([src/privacy.py](src/privacy.py)):
    - **Clipping**: Each client update is clipped to threshold $C$ (`clip_norm`):
      $$\tilde{\Delta}_k = \Delta w_k \cdot \min\left(1,\; \frac{C}{\|\Delta w_k\|_2}\right)$$
-   - **FedAvg Aggregation**: Sample-weighted average $\bar{\Delta} = \sum_{k=1}^K \frac{n_k}{N} \tilde{\Delta}_k$ with client-level sensitivity $S = C \cdot \max_k \frac{n_k}{N}$.
+   - **FedAvg Aggregation**: Sample-weighted average $\bar{\Delta} = \sum_{k=1}^K \frac{n_k}{N} \tilde{\Delta}_k$. For fixed client weights and roster, replacing one clipped client update changes the aggregate by at most $2C \cdot \max_k \frac{n_k}{N}$ in L2.
    - **Noise Calibration**:
-     - **Laplace**: $b = \frac{S}{\epsilon}$, adding i.i.d. $\text{Laplace}(0, b)$ noise per parameter.
-     - **Gaussian**: $\sigma = \frac{S \sqrt{2 \ln(1.25 / \delta)}}{\epsilon}$, adding i.i.d. $\mathcal{N}(0, \sigma^2)$ noise per parameter.
+     - **Laplace**: Independent coordinate-wise Laplace noise uses the L1 bound $S_1 = \sqrt{d} S_2$, where $d$ is the number of model parameters and $S_2$ is the L2 replacement bound; $b = \frac{S_1}{\epsilon}$.
+     - **Gaussian**: The Gaussian mechanism uses the L2 replacement bound $S_2$; $\sigma = \frac{S_2 \sqrt{2 \ln(1.25 / \delta)}}{\epsilon}$.
    - **Privacy Accounting**: Tracks per-round and cumulative $(\epsilon, \delta)$ using basic and advanced composition bounds.
 
 4. **Client Drift & Dispersion Tracking**:
@@ -70,24 +70,24 @@ Run with default configuration (`--num-clients 5 --num-rounds 10 --alpha 0.5 --d
 python main.py
 ```
 
-Run a custom simulation (e.g., 4 clients, 6 rounds, Laplace DP with $\epsilon = 2.0$):
+Run a utility-oriented demo configuration (e.g., 4 clients, 6 rounds, Laplace DP with $\epsilon = 50.0$):
 
 ```bash
-python main.py --num-clients 4 --num-rounds 6 --epsilon 2.0
+python main.py --num-clients 4 --num-rounds 6 --epsilon 50.0
 ```
 
 ### Observed CLI Output
 
 ```text
-12:28:46 | INFO | Fed-Sim initialized | clients=4 alpha=0.50 skew_tv=0.409 dp=laplace eps=2.00 clip=1.00 sizes=[432, 400, 502, 266] | init_acc=0.1700 init_loss=1.4575
-12:28:48 | INFO | Round 01/06 | test_acc=0.2925 test_loss=1.2661 | mean_drift=2.5019 max_drift=2.6979 clipped=4/4 | noise_scale=0.1569 noise_l2=3.794 cum_eps=2.00 | drift=[c0:2.410, c1:2.698, c2:2.571, c3:2.329]
-12:28:48 | INFO | Round 02/06 | test_acc=0.6300 test_loss=0.8997 | mean_drift=2.1126 max_drift=2.2882 clipped=4/4 | noise_scale=0.1569 noise_l2=3.536 cum_eps=4.00 | drift=[c0:2.148, c1:2.058, c2:2.288, c3:1.956]
-12:28:48 | INFO | Round 03/06 | test_acc=0.7775 test_loss=0.6248 | mean_drift=1.8493 max_drift=2.0132 clipped=4/4 | noise_scale=0.1569 noise_l2=3.797 cum_eps=6.00 | drift=[c0:2.013, c1:1.868, c2:1.799, c3:1.717]
-12:28:48 | INFO | Round 04/06 | test_acc=0.6450 test_loss=0.9430 | mean_drift=1.4534 max_drift=1.7604 clipped=4/4 | noise_scale=0.1569 noise_l2=3.872 cum_eps=8.00 | drift=[c0:1.760, c1:1.342, c2:1.566, c3:1.145]
-12:28:49 | INFO | Round 05/06 | test_acc=0.8300 test_loss=0.4718 | mean_drift=1.4863 max_drift=1.7736 clipped=4/4 | noise_scale=0.1569 noise_l2=3.497 cum_eps=10.00 | drift=[c0:1.774, c1:1.360, c2:1.758, c3:1.054]
-12:28:49 | INFO | Round 06/06 | test_acc=0.8850 test_loss=0.3509 | mean_drift=1.0944 max_drift=1.3293 clipped=3/4 | noise_scale=0.1569 noise_l2=3.315 cum_eps=12.00 | drift=[c0:1.328, c1:1.067, c2:1.329, c3:0.654]
+10:14:50 | INFO | Fed-Sim initialized | clients=4 alpha=0.50 skew_tv=0.409 dp=laplace eps=50.00 clip=1.00 sizes=[432, 400, 502, 266] | init_acc=0.1700 init_loss=1.4575
+10:14:52 | INFO | Round 01/06 | test_acc=0.2850 test_loss=1.4286 | mean_drift=2.5019 max_drift=2.6979 clipped=4/4 | noise_scale=0.2085 noise_l2=5.042 cum_eps=50.00 | drift=[c0:2.410, c1:2.698, c2:2.571, c3:2.329]
+10:14:52 | INFO | Round 02/06 | test_acc=0.5000 test_loss=1.1617 | mean_drift=2.1196 max_drift=2.2714 clipped=4/4 | noise_scale=0.2085 noise_l2=4.700 cum_eps=100.00 | drift=[c0:2.246, c1:1.993, c2:2.271, c3:1.969]
+10:14:52 | INFO | Round 03/06 | test_acc=0.6250 test_loss=1.1001 | mean_drift=2.0253 max_drift=2.2879 clipped=4/4 | noise_scale=0.2085 noise_l2=5.046 cum_eps=150.00 | drift=[c0:2.288, c1:1.987, c2:1.935, c3:1.892]
+10:14:53 | INFO | Round 04/06 | test_acc=0.5700 test_loss=1.6227 | mean_drift=1.7503 max_drift=2.0590 clipped=4/4 | noise_scale=0.2085 noise_l2=5.146 cum_eps=200.00 | drift=[c0:2.059, c1:1.617, c2:1.885, c3:1.440]
+10:14:53 | INFO | Round 05/06 | test_acc=0.6400 test_loss=1.2871 | mean_drift=1.8295 max_drift=2.2438 clipped=4/4 | noise_scale=0.2085 noise_l2=4.648 cum_eps=250.00 | drift=[c0:2.244, c1:1.596, c2:2.136, c3:1.342]
+10:14:53 | INFO | Round 06/06 | test_acc=0.7450 test_loss=0.7622 | mean_drift=1.5590 max_drift=1.9615 clipped=4/4 | noise_scale=0.2085 noise_l2=4.406 cum_eps=300.00 | drift=[c0:1.799, c1:1.474, c2:1.961, c3:1.001]
 
-Simulation Complete: round_1_acc=0.2925 -> round_6_acc=0.8850 (loss=0.3509, mean_drift=1.0944, cum_eps=12.00)
+Simulation Complete: round_1_acc=0.2850 -> round_6_acc=0.7450 (loss=0.7622, mean_drift=1.5590, cum_eps=300.00)
 ```
 
 ## Running Tests

@@ -11,7 +11,7 @@ import torch
 
 from config import SimulationConfig
 from main import main as cli_main
-from src.models import FederatedClient, FederatedServer, TabularClassifier
+from src.models import ClientUpdate, FederatedClient, FederatedServer, TabularClassifier
 from src.pipeline import FederatedLearningPipeline
 from src.privacy import (
     PrivacyAccountant,
@@ -107,7 +107,7 @@ def test_global_accuracy_improves_and_weights_broadcast() -> None:
         num_rounds=6,
         alpha=0.5,
         dp_mechanism="laplace",
-        epsilon=2.0,
+        epsilon=50.0,
         clip_norm=1.0,
         seed=42,
     )
@@ -124,6 +124,138 @@ def test_global_accuracy_improves_and_weights_broadcast() -> None:
         local_state = client.model.state_dict()
         for key, g_tensor in global_state.items():
             assert torch.allclose(local_state[key], g_tensor)
+
+
+@pytest.mark.parametrize(
+    ("mechanism", "expected_sensitivity"),
+    [
+        ("laplace", math.sqrt(12.0)),
+        ("gaussian", 1.0),
+    ],
+)
+def test_server_uses_mechanism_specific_replacement_sensitivity(
+    mechanism: str, expected_sensitivity: float
+) -> None:
+    model = TabularClassifier(input_dim=2, hidden_dim=2, num_classes=2)
+    state = model.state_dict()
+    zero_delta = {key: torch.zeros_like(value) for key, value in state.items()}
+    updates = [
+        ClientUpdate(
+            client_id=client_id,
+            num_samples=10,
+            delta={key: value.clone() for key, value in zero_delta.items()},
+            local_state={key: value.clone() for key, value in state.items()},
+            pre_clip_drift_l2=0.0,
+            train_loss=0.0,
+            train_accuracy=0.0,
+        )
+        for client_id in range(2)
+    ]
+    server = FederatedServer(
+        global_model=model,
+        X_test=torch.zeros((2, 2)),
+        y_test=torch.zeros(2, dtype=torch.long),
+        dp_mechanism=mechanism,
+        epsilon=2.0,
+        delta=1e-5,
+        clip_norm=1.0,
+    )
+
+    metrics = server.aggregate_and_update(updates)
+
+    assert metrics.sensitivity == pytest.approx(expected_sensitivity)
+    expected_scale = compute_dp_noise_scale(
+        mechanism,
+        sensitivity=expected_sensitivity,
+        epsilon=2.0,
+        delta=1e-5,
+    )
+    assert metrics.noise_scale == pytest.approx(expected_scale)
+    assert metrics.privacy.sensitivity == pytest.approx(expected_sensitivity)
+
+
+def test_server_rejects_nonfinite_client_sample_counts_before_mutating_round_state() -> None:
+    model = TabularClassifier(input_dim=2, hidden_dim=2, num_classes=2)
+    state = model.state_dict()
+    delta = {key: torch.zeros_like(value) for key, value in state.items()}
+    update = ClientUpdate(
+        client_id=3,
+        num_samples=float("nan"),  # type: ignore[arg-type]
+        delta=delta,
+        local_state=state,
+        pre_clip_drift_l2=0.0,
+        train_loss=0.0,
+        train_accuracy=0.0,
+    )
+    server = FederatedServer(
+        global_model=model,
+        X_test=torch.zeros((2, 2)),
+        y_test=torch.zeros(2, dtype=torch.long),
+        dp_mechanism="none",
+    )
+
+    with pytest.raises(ValueError, match="num_samples must be positive and finite"):
+        server.aggregate_and_update([update])
+
+    assert server.round_idx == 0
+    assert server.privacy_accountant.rounds_completed == 0
+
+
+def test_server_rejects_duplicate_client_ids_before_mutating_round_state() -> None:
+    model = TabularClassifier(input_dim=2, hidden_dim=2, num_classes=2)
+    state = model.state_dict()
+    delta = {key: torch.zeros_like(value) for key, value in state.items()}
+    update = ClientUpdate(
+        client_id=3,
+        num_samples=5,
+        delta=delta,
+        local_state=state,
+        pre_clip_drift_l2=0.0,
+        train_loss=0.0,
+        train_accuracy=0.0,
+    )
+    server = FederatedServer(
+        global_model=model,
+        X_test=torch.zeros((2, 2)),
+        y_test=torch.zeros(2, dtype=torch.long),
+        dp_mechanism="none",
+    )
+
+    with pytest.raises(ValueError, match="client_id values must be unique"):
+        server.aggregate_and_update([update, update])
+
+    assert server.round_idx == 0
+    assert server.privacy_accountant.rounds_completed == 0
+
+
+def test_server_rejects_nonpositive_client_sample_counts_before_mutating_round_state() -> None:
+    model = TabularClassifier(input_dim=2, hidden_dim=2, num_classes=2)
+    state = model.state_dict()
+    delta = {key: torch.zeros_like(value) for key, value in state.items()}
+    updates = [
+        ClientUpdate(
+            client_id=client_id,
+            num_samples=num_samples,
+            delta={key: value.clone() for key, value in delta.items()},
+            local_state={key: value.clone() for key, value in state.items()},
+            pre_clip_drift_l2=0.0,
+            train_loss=0.0,
+            train_accuracy=0.0,
+        )
+        for client_id, num_samples in enumerate((0, 10))
+    ]
+    server = FederatedServer(
+        global_model=model,
+        X_test=torch.zeros((2, 2)),
+        y_test=torch.zeros(2, dtype=torch.long),
+        dp_mechanism="none",
+    )
+
+    with pytest.raises(ValueError, match="num_samples must be positive and finite"):
+        server.aggregate_and_update(updates)
+
+    assert server.round_idx == 0
+    assert server.privacy_accountant.rounds_completed == 0
 
 
 def test_gaussian_dp_and_privacy_accountant() -> None:

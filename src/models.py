@@ -1,6 +1,7 @@
 """PyTorch models, FederatedClient, and FederatedServer implementations."""
 
 from dataclasses import dataclass
+import math
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import torch
@@ -210,6 +211,14 @@ class FederatedServer:
         """Clip client deltas, aggregate via sample-weighted FedAvg, apply DP noise, and update."""
         if not client_updates:
             raise ValueError("client_updates cannot be empty")
+        client_ids = [update.client_id for update in client_updates]
+        if len(set(client_ids)) != len(client_ids):
+            raise ValueError("client_id values must be unique within a round")
+        if any(
+            not math.isfinite(update.num_samples) or update.num_samples <= 0
+            for update in client_updates
+        ):
+            raise ValueError("num_samples must be positive and finite for every client update")
 
         self.round_idx += 1
         prev_global_state = {
@@ -254,8 +263,13 @@ class FederatedServer:
             diff = {k: update.delta[k] - unclipped_mean[k] for k in prev_global_state}
             per_client_dispersion[update.client_id] = tensor_dict_l2_norm(diff)
 
-        # Client-level L2 sensitivity of sample-weighted FedAvg with per-client norm <= clip_norm.
-        sensitivity = self.clip_norm * max(weights)
+        # Replacing one client's clipped update changes the weighted aggregate by at
+        # most 2 * clip_norm * max(weight) in L2. Coordinate-wise Laplace noise needs
+        # the corresponding L1 bound, which is at most sqrt(dimension) times L2.
+        sensitivity = 2.0 * self.clip_norm * max(weights)
+        if self.dp_mechanism == "laplace":
+            dimension = sum(tensor.numel() for tensor in prev_global_state.values())
+            sensitivity *= dimension**0.5
         noisy_agg, noise_scale, noise_l2_norm = add_dp_noise(
             aggregate_delta=agg_clean,
             mechanism=self.dp_mechanism,
