@@ -370,3 +370,40 @@ def test_cli_smoke_run() -> None:
         check=True,
     )
     assert "Simulation Complete:" in proc.stdout
+
+
+class _FakeResult:
+    def __init__(self, final_accuracy: float) -> None:
+        self.final_accuracy = final_accuracy
+
+
+def test_exit_code_no_threshold_always_succeeds() -> None:
+    from main import exit_code_for
+
+    assert exit_code_for(_FakeResult(0.0), None) == 0
+
+
+def test_exit_code_gates_on_min_accuracy() -> None:
+    from main import exit_code_for
+
+    assert exit_code_for(_FakeResult(0.5), 0.6) == 1
+    assert exit_code_for(_FakeResult(0.6), 0.6) == 0
+    assert exit_code_for(_FakeResult(0.9), 0.6) == 0
+
+
+def test_exit_code_rejects_invalid_threshold() -> None:
+    import math
+
+    import pytest
+
+    from main import exit_code_for
+
+    for bad in (float("nan"), float("inf"), float("-inf"), -0.1, 1.5):
+        with pytest.raises(ValueError, match="min_accuracy must be a finite value"):
+            exit_code_for(_FakeResult(1.0), bad)
+
+
+def test_cli_min_accuracy_gates_the_run() -> None:
+    argv = ["--num-clients", "3", "--num-rounds", "3", "--local-epochs", "2", "--seed", "42"]
+    assert cli_main(argv + ["--min-accuracy", "0.0"]) == 0
+    assert cli_main(argv + ["--min-accuracy", "1.0"]) == 1

@@ -76,6 +76,14 @@ Run a utility-oriented demo configuration (e.g., 4 clients, 6 rounds, Laplace DP
 python main.py --num-clients 4 --num-rounds 6 --epsilon 50.0
 ```
 
+Add `--min-accuracy FLOAT` to gate a CI job: the run exits non-zero when the final
+round's test accuracy falls below the threshold in `[0, 1]`, and an out-of-range
+threshold is rejected rather than silently disabling the gate:
+
+```bash
+python main.py --num-clients 4 --num-rounds 6 --epsilon 50.0 --min-accuracy 0.6
+```
+
 ### Observed CLI Output
 
 ```text
