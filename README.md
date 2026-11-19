@@ -92,7 +92,9 @@ python main.py --num-clients 4 --num-rounds 6 --epsilon 50.0
 | `--seed` | `42` | Random seed |
 
 All numeric flags must be finite: `nan`/`inf` values are rejected at startup instead
-of producing a run full of `nan` losses.
+of producing a run full of `nan` losses. The server also rejects client updates with
+missing/extra parameter keys, mismatched tensor shapes, or non-finite values before
+mutating the global model, round counter, or privacy accountant.
 
 Add `--min-accuracy FLOAT` to gate a CI job: the run exits non-zero when the final
 round's test accuracy falls below the threshold in `[0, 1]`, and an out-of-range

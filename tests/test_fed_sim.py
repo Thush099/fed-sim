@@ -264,6 +264,55 @@ def test_server_rejects_nonpositive_client_sample_counts_before_mutating_round_s
     assert server.privacy_accountant.rounds_completed == 0
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing_key", "delta keys must match global model state"),
+        ("wrong_shape", "delta tensor shape mismatch"),
+        ("non_finite", "delta tensors must contain only finite values"),
+    ],
+)
+def test_server_rejects_malformed_client_delta_before_state_mutation(
+    mutation: str, message: str
+) -> None:
+    model = TabularClassifier(input_dim=2, hidden_dim=2, num_classes=2)
+    state = model.state_dict()
+    delta = {key: torch.zeros_like(value) for key, value in state.items()}
+    if mutation == "missing_key":
+        delta.pop(next(iter(delta)))
+    elif mutation == "wrong_shape":
+        key = next(iter(delta))
+        delta[key] = torch.zeros((1,), dtype=delta[key].dtype)
+    else:
+        key = next(iter(delta))
+        delta[key].view(-1)[0] = float("nan")
+
+    update = ClientUpdate(
+        client_id=0,
+        num_samples=5,
+        delta=delta,
+        local_state=state,
+        pre_clip_drift_l2=0.0,
+        train_loss=0.0,
+        train_accuracy=0.0,
+    )
+    server = FederatedServer(
+        global_model=model,
+        X_test=torch.zeros((2, 2)),
+        y_test=torch.zeros(2, dtype=torch.long),
+        dp_mechanism="none",
+    )
+    state_before = {key: value.clone() for key, value in model.state_dict().items()}
+
+    with pytest.raises(ValueError, match=message):
+        server.aggregate_and_update([update])
+
+    assert server.round_idx == 0
+    assert server.privacy_accountant.rounds_completed == 0
+    for key, value in model.state_dict().items():
+        assert torch.equal(value, state_before[key])
+
+
 def test_gaussian_dp_and_privacy_accountant() -> None:
     """Verify Gaussian DP mode converges under sufficient client count and tracks budget."""
     config = SimulationConfig(

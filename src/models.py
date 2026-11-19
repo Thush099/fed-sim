@@ -220,9 +220,25 @@ class FederatedServer:
         ):
             raise ValueError("num_samples must be positive and finite for every client update")
 
+        global_state = self.global_model.state_dict()
+        expected_keys = set(global_state)
+        for update in client_updates:
+            if set(update.delta) != expected_keys:
+                raise ValueError("delta keys must match global model state")
+            for key, value in update.delta.items():
+                if not isinstance(value, torch.Tensor):
+                    raise ValueError(f"delta value for {key!r} must be a tensor")
+                if value.shape != global_state[key].shape:
+                    raise ValueError(
+                        f"delta tensor shape mismatch for {key!r}: "
+                        f"expected {tuple(global_state[key].shape)}, got {tuple(value.shape)}"
+                    )
+                if not torch.isfinite(value).all():
+                    raise ValueError("delta tensors must contain only finite values")
+
         self.round_idx += 1
         prev_global_state = {
-            k: v.detach().clone() for k, v in self.global_model.state_dict().items()
+            k: v.detach().clone() for k, v in global_state.items()
         }
 
         total_samples = sum(update.num_samples for update in client_updates)
