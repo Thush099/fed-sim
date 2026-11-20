@@ -2,9 +2,23 @@
 
 from dataclasses import dataclass, field
 import math
+from numbers import Real
 from typing import Dict, List, Mapping, Optional, Tuple
 
 import torch
+
+
+def _require_finite_real(name: str, value: float, *, positive: bool) -> None:
+    """Reject booleans, non-real numbers, and non-finite values for DP parameters."""
+    qualifier = "positive" if positive else "non-negative"
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, Real)
+        or not math.isfinite(value)
+        or value < 0
+        or (positive and value == 0)
+    ):
+        raise ValueError(f"{name} must be a finite {qualifier} real, got {value!r}")
 
 
 def tensor_dict_l2_norm(tensors: Mapping[str, torch.Tensor]) -> float:
@@ -28,8 +42,7 @@ def clip_update_l2(
     Returns:
         Tuple of ``(clipped_delta, original_l2_norm, was_clipped)``.
     """
-    if clip_norm <= 0:
-        raise ValueError(f"clip_norm must be positive, got {clip_norm}")
+    _require_finite_real("clip_norm", clip_norm, positive=True)
 
     original_norm = tensor_dict_l2_norm(delta)
     if original_norm <= clip_norm or original_norm == 0.0:
@@ -58,10 +71,8 @@ def compute_dp_noise_scale(
     For Laplace: ``scale = sensitivity / epsilon``.
     For Gaussian: ``sigma = sensitivity * sqrt(2 * ln(1.25 / delta)) / epsilon``.
     """
-    if sensitivity < 0:
-        raise ValueError(f"sensitivity must be non-negative, got {sensitivity}")
-    if epsilon <= 0:
-        raise ValueError(f"epsilon must be positive, got {epsilon}")
+    _require_finite_real("sensitivity", sensitivity, positive=False)
+    _require_finite_real("epsilon", epsilon, positive=True)
     if not (0.0 < delta < 1.0):
         raise ValueError(f"delta must be in (0, 1), got {delta}")
 
@@ -170,6 +181,36 @@ class PrivacyAccountant:
     slack_delta: float = 1e-5
     history: List[PrivacyStepRecord] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if self.mechanism not in ("laplace", "gaussian", "none"):
+            raise ValueError(
+                "mechanism must be one of ('laplace', 'gaussian', 'none'), "
+                f"got {self.mechanism!r}"
+            )
+        _require_finite_real(
+            "epsilon_per_round",
+            self.epsilon_per_round,
+            positive=self.mechanism != "none",
+        )
+        if (
+            isinstance(self.delta_per_round, bool)
+            or not isinstance(self.delta_per_round, Real)
+            or not math.isfinite(self.delta_per_round)
+            or not 0.0 <= self.delta_per_round < 1.0
+        ):
+            raise ValueError(
+                f"delta_per_round must be finite and in [0, 1), got {self.delta_per_round!r}"
+            )
+        if (
+            isinstance(self.slack_delta, bool)
+            or not isinstance(self.slack_delta, Real)
+            or not math.isfinite(self.slack_delta)
+            or not 0.0 < self.slack_delta <= 1.0
+        ):
+            raise ValueError(
+                f"slack_delta must be finite and in (0, 1], got {self.slack_delta!r}"
+            )
+
     @property
     def rounds_completed(self) -> int:
         return len(self.history)
@@ -189,9 +230,12 @@ class PrivacyAccountant:
         basic = t * self.epsilon_per_round
         if self.mechanism == "gaussian":
             eps = self.epsilon_per_round
-            adv = math.sqrt(2.0 * t * math.log(1.0 / self.slack_delta)) * eps + t * eps * (
-                math.exp(eps) - 1.0
-            )
+            try:
+                adv = math.sqrt(2.0 * t * math.log(1.0 / self.slack_delta)) * eps + t * eps * (
+                    math.exp(eps) - 1.0
+                )
+            except OverflowError:
+                adv = math.inf
             return min(basic, adv)
         return basic
 
@@ -206,6 +250,8 @@ class PrivacyAccountant:
 
     def step(self, round_idx: int, sensitivity: float, noise_scale: float) -> PrivacyStepRecord:
         """Record one round of DP noise release and return the updated budget snapshot."""
+        _require_finite_real("sensitivity", sensitivity, positive=False)
+        _require_finite_real("noise_scale", noise_scale, positive=False)
         round_eps = 0.0 if self.mechanism == "none" else self.epsilon_per_round
         round_del = self.delta_per_round if self.mechanism == "gaussian" else 0.0
         # Append placeholder first to compute updated totals cleanly.

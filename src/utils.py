@@ -1,6 +1,8 @@
 """Data generation, Dirichlet non-IID partitioning, and reproducibility helpers."""
 
 from dataclasses import dataclass
+import math
+from numbers import Real
 import random
 from typing import List, Sequence, Tuple
 
@@ -45,8 +47,13 @@ def dirichlet_partition(
     """
     if num_clients < 1:
         raise ValueError(f"num_clients must be >= 1, got {num_clients}")
-    if alpha <= 0:
-        raise ValueError(f"alpha must be > 0, got {alpha}")
+    if (
+        isinstance(alpha, bool)
+        or not isinstance(alpha, Real)
+        or not math.isfinite(alpha)
+        or alpha <= 0
+    ):
+        raise ValueError(f"alpha must be a finite positive real, got {alpha!r}")
     if len(labels) < num_clients:
         raise ValueError("Total number of samples must be at least num_clients")
 
