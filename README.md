@@ -42,6 +42,7 @@ A clean, modular PyTorch simulator for **Federated Averaging (FedAvg)** under **
      - **Laplace**: Independent coordinate-wise Laplace noise uses the L1 bound $S_1 = \sqrt{d} S_2$, where $d$ is the number of model parameters and $S_2$ is the L2 replacement bound; $b = \frac{S_1}{\epsilon}$.
      - **Gaussian**: The Gaussian mechanism uses the L2 replacement bound $S_2$; $\sigma = \frac{S_2 \sqrt{2 \ln(1.25 / \delta)}}{\epsilon}$.
    - **Privacy Accounting**: Tracks per-round and cumulative $(\epsilon, \delta)$ using basic and advanced composition bounds.
+   - **Parameter Validation**: `clip_norm`, `sensitivity`, and `epsilon` must be finite real numbers (and positive where required), and the Dirichlet `alpha` must be a finite positive real; `NaN`/infinite values are rejected at each helper's boundary instead of silently disabling clipping or noise.
 
 4. **Client Drift & Dispersion Tracking**:
    Logs per-client parameter drift against the broadcast global model ($\|\Delta w_k\|_2 = \|w_k - w_{\text{global}}\|_2$) and dispersion around the FedAvg center ($\|w_k - w_{\text{fedavg}}\|_2$) on every round.

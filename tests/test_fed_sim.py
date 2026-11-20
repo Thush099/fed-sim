@@ -106,6 +106,54 @@ def test_smaller_epsilon_yields_larger_dp_perturbation(mechanism: str) -> None:
     assert norm_small_eps > norm_large_eps
 
 
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), float("-inf"), True, "1.0"]
+)
+def test_compute_dp_noise_scale_rejects_invalid_sensitivity(value: object) -> None:
+    with pytest.raises(ValueError, match="sensitivity must be a finite non-negative real"):
+        compute_dp_noise_scale("laplace", sensitivity=value, epsilon=1.0)
+
+
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0, True, "1.0"]
+)
+def test_compute_dp_noise_scale_rejects_invalid_epsilon(value: object) -> None:
+    with pytest.raises(ValueError, match="epsilon must be a finite positive real"):
+        compute_dp_noise_scale("laplace", sensitivity=1.0, epsilon=value)
+
+
+@pytest.mark.parametrize("mechanism", ["laplace", "gaussian"])
+def test_add_dp_noise_rejects_non_finite_epsilon(mechanism: str) -> None:
+    """A non-finite epsilon must not silently disable or corrupt DP noise."""
+    delta = {"w": torch.zeros(4)}
+    for epsilon in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="epsilon must be a finite positive real"):
+            add_dp_noise(delta, mechanism=mechanism, sensitivity=1.0, epsilon=epsilon)
+
+
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0, True, "1.0"]
+)
+def test_clip_update_l2_rejects_invalid_clip_norm(value: object) -> None:
+    with pytest.raises(ValueError, match="clip_norm must be a finite positive real"):
+        clip_update_l2({"w": torch.ones(4)}, clip_norm=value)
+
+
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0, True, "0.5"]
+)
+def test_dirichlet_partition_rejects_invalid_alpha(value: object) -> None:
+    with pytest.raises(ValueError, match="alpha must be a finite positive real"):
+        dirichlet_partition(np.array([0, 1] * 20), num_clients=2, alpha=value)
+
+
+def test_dirichlet_partition_accepts_numpy_float_alpha() -> None:
+    shards = dirichlet_partition(
+        np.array([0, 1] * 20), num_clients=2, alpha=np.float32(0.5), seed=3
+    )
+    assert sum(len(shard) for shard in shards) == 40
+
+
 def test_global_accuracy_improves_and_weights_broadcast() -> None:
     """Global model accuracy strictly improves over rounds and server broadcasts weights."""
     config = SimulationConfig(

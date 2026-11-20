@@ -2,9 +2,23 @@
 
 from dataclasses import dataclass, field
 import math
+from numbers import Real
 from typing import Dict, List, Mapping, Optional, Tuple
 
 import torch
+
+
+def _require_finite_real(name: str, value: float, *, positive: bool) -> None:
+    """Reject booleans, non-real numbers, and non-finite values for DP parameters."""
+    qualifier = "positive" if positive else "non-negative"
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, Real)
+        or not math.isfinite(value)
+        or value < 0
+        or (positive and value == 0)
+    ):
+        raise ValueError(f"{name} must be a finite {qualifier} real, got {value!r}")
 
 
 def tensor_dict_l2_norm(tensors: Mapping[str, torch.Tensor]) -> float:
@@ -28,8 +42,7 @@ def clip_update_l2(
     Returns:
         Tuple of ``(clipped_delta, original_l2_norm, was_clipped)``.
     """
-    if clip_norm <= 0:
-        raise ValueError(f"clip_norm must be positive, got {clip_norm}")
+    _require_finite_real("clip_norm", clip_norm, positive=True)
 
     original_norm = tensor_dict_l2_norm(delta)
     if original_norm <= clip_norm or original_norm == 0.0:
@@ -58,10 +71,8 @@ def compute_dp_noise_scale(
     For Laplace: ``scale = sensitivity / epsilon``.
     For Gaussian: ``sigma = sensitivity * sqrt(2 * ln(1.25 / delta)) / epsilon``.
     """
-    if sensitivity < 0:
-        raise ValueError(f"sensitivity must be non-negative, got {sensitivity}")
-    if epsilon <= 0:
-        raise ValueError(f"epsilon must be positive, got {epsilon}")
+    _require_finite_real("sensitivity", sensitivity, positive=False)
+    _require_finite_real("epsilon", epsilon, positive=True)
     if not (0.0 < delta < 1.0):
         raise ValueError(f"delta must be in (0, 1), got {delta}")
 
