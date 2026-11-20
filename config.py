@@ -68,6 +68,14 @@ class SimulationConfig:
             raise ValueError(f"clip_norm must be > 0, got {self.clip_norm}")
         if not (0.0 < self.test_size < 1.0):
             raise ValueError(f"test_size must be in (0, 1), got {self.test_size}")
+        if self.num_samples < 1:
+            raise ValueError(f"num_samples must be >= 1, got {self.num_samples}")
+        if self.num_features < 1:
+            raise ValueError(f"num_features must be >= 1, got {self.num_features}")
+        if self.num_informative < 1:
+            raise ValueError(f"num_informative must be >= 1, got {self.num_informative}")
+        if self.num_classes < 2:
+            raise ValueError(f"num_classes must be >= 2, got {self.num_classes}")
         if self.num_informative > self.num_features:
             raise ValueError("num_informative cannot exceed num_features")
 

@@ -403,6 +403,33 @@ def test_deterministic_reproducibility_and_validation() -> None:
         SimulationConfig(dp_mechanism="invalid")  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"num_samples": 0}, "num_samples must be >= 1"),
+        ({"num_samples": -5}, "num_samples must be >= 1"),
+        ({"num_features": 0}, "num_features must be >= 1"),
+        ({"num_informative": 0}, "num_informative must be >= 1"),
+        ({"num_classes": 1}, "num_classes must be >= 2"),
+        ({"num_classes": -5}, "num_classes must be >= 2"),
+    ],
+)
+def test_config_rejects_invalid_dataset_shape(
+    overrides: dict[str, object], message: str
+) -> None:
+    """Dataset-shape fields are validated at config time, not deep in make_classification."""
+    with pytest.raises(ValueError, match=message):
+        SimulationConfig(**overrides)  # type: ignore[arg-type]
+
+
+def test_config_accepts_valid_dataset_shape() -> None:
+    for overrides in (
+        {"num_samples": 2000, "num_features": 12, "num_informative": 10, "num_classes": 4},
+        {"num_samples": 1, "num_features": 1, "num_informative": 1, "num_classes": 2},
+    ):
+        SimulationConfig(**overrides)  # type: ignore[arg-type]
+
+
 def test_cli_smoke_run() -> None:
     """CLI entrypoint runs cleanly end-to-end with requested flags."""
     exit_code = cli_main(["--num-clients", "4", "--num-rounds", "6", "--epsilon", "2.0"])
