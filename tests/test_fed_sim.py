@@ -389,6 +389,70 @@ def test_gaussian_dp_and_privacy_accountant() -> None:
     assert rec2.cumulative_epsilon_basic == pytest.approx(3.0)
 
 
+@pytest.mark.parametrize("mechanism", ["lapce", "Laplace", "", "none ", 5, None])
+def test_privacy_accountant_rejects_unknown_mechanism(mechanism: object) -> None:
+    """A typo'd mechanism must not silently account as Laplace."""
+    with pytest.raises(ValueError, match="mechanism must be one of"):
+        PrivacyAccountant(mechanism=mechanism, epsilon_per_round=1.0)
+
+
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), float("-inf"), -1.0, True, "1.0"]
+)
+def test_privacy_accountant_rejects_invalid_epsilon_per_round(value: object) -> None:
+    with pytest.raises(ValueError, match="epsilon_per_round must be a finite"):
+        PrivacyAccountant(mechanism="laplace", epsilon_per_round=value)
+
+
+def test_privacy_accountant_rejects_zero_epsilon_for_real_mechanisms() -> None:
+    with pytest.raises(ValueError, match="epsilon_per_round must be a finite positive real"):
+        PrivacyAccountant(mechanism="laplace", epsilon_per_round=0.0)
+    # 'none' releases no noise, so a zero budget is meaningful there.
+    accountant = PrivacyAccountant(mechanism="none", epsilon_per_round=0.0)
+    assert accountant.cumulative_epsilon_basic == 0.0
+
+
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), float("-inf"), -0.1, 1.0, True, "0.1"]
+)
+def test_privacy_accountant_rejects_invalid_delta_per_round(value: object) -> None:
+    with pytest.raises(ValueError, match="delta_per_round must be finite and in \[0, 1\)"):
+        PrivacyAccountant(
+            mechanism="gaussian", epsilon_per_round=1.0, delta_per_round=value
+        )
+
+
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), float("-inf"), 0.0, -0.1, 1.5, True, "0.1"]
+)
+def test_privacy_accountant_rejects_invalid_slack_delta(value: object) -> None:
+    with pytest.raises(ValueError, match="slack_delta must be finite and in \(0, 1\]"):
+        PrivacyAccountant(
+            mechanism="gaussian", epsilon_per_round=1.0, slack_delta=value
+        )
+
+
+def test_privacy_accountant_composed_bound_handles_large_epsilon() -> None:
+    """Advanced composition must not overflow; the basic bound takes over."""
+    accountant = PrivacyAccountant(mechanism="gaussian", epsilon_per_round=800.0)
+    accountant.step(round_idx=1, sensitivity=1.0, noise_scale=0.5)
+    assert accountant.cumulative_epsilon_composed == pytest.approx(800.0)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"sensitivity": float("nan"), "noise_scale": 0.5},
+        {"sensitivity": 1.0, "noise_scale": float("inf")},
+        {"sensitivity": -1.0, "noise_scale": 0.5},
+    ],
+)
+def test_privacy_accountant_step_rejects_invalid_noise_inputs(kwargs: dict) -> None:
+    accountant = PrivacyAccountant(mechanism="laplace", epsilon_per_round=1.0)
+    with pytest.raises(ValueError, match="must be a finite non-negative real"):
+        accountant.step(round_idx=1, **kwargs)
+
+
 def test_low_dirichlet_alpha_induces_higher_client_drift() -> None:
     """Non-IID partitioning (alpha=0.2) produces higher client parameter drift than IID (alpha=100.0)."""
     non_iid_cfg = SimulationConfig(

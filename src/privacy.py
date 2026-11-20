@@ -181,6 +181,36 @@ class PrivacyAccountant:
     slack_delta: float = 1e-5
     history: List[PrivacyStepRecord] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if self.mechanism not in ("laplace", "gaussian", "none"):
+            raise ValueError(
+                "mechanism must be one of ('laplace', 'gaussian', 'none'), "
+                f"got {self.mechanism!r}"
+            )
+        _require_finite_real(
+            "epsilon_per_round",
+            self.epsilon_per_round,
+            positive=self.mechanism != "none",
+        )
+        if (
+            isinstance(self.delta_per_round, bool)
+            or not isinstance(self.delta_per_round, Real)
+            or not math.isfinite(self.delta_per_round)
+            or not 0.0 <= self.delta_per_round < 1.0
+        ):
+            raise ValueError(
+                f"delta_per_round must be finite and in [0, 1), got {self.delta_per_round!r}"
+            )
+        if (
+            isinstance(self.slack_delta, bool)
+            or not isinstance(self.slack_delta, Real)
+            or not math.isfinite(self.slack_delta)
+            or not 0.0 < self.slack_delta <= 1.0
+        ):
+            raise ValueError(
+                f"slack_delta must be finite and in (0, 1], got {self.slack_delta!r}"
+            )
+
     @property
     def rounds_completed(self) -> int:
         return len(self.history)
@@ -200,9 +230,12 @@ class PrivacyAccountant:
         basic = t * self.epsilon_per_round
         if self.mechanism == "gaussian":
             eps = self.epsilon_per_round
-            adv = math.sqrt(2.0 * t * math.log(1.0 / self.slack_delta)) * eps + t * eps * (
-                math.exp(eps) - 1.0
-            )
+            try:
+                adv = math.sqrt(2.0 * t * math.log(1.0 / self.slack_delta)) * eps + t * eps * (
+                    math.exp(eps) - 1.0
+                )
+            except OverflowError:
+                adv = math.inf
             return min(basic, adv)
         return basic
 
@@ -217,6 +250,8 @@ class PrivacyAccountant:
 
     def step(self, round_idx: int, sensitivity: float, noise_scale: float) -> PrivacyStepRecord:
         """Record one round of DP noise release and return the updated budget snapshot."""
+        _require_finite_real("sensitivity", sensitivity, positive=False)
+        _require_finite_real("noise_scale", noise_scale, positive=False)
         round_eps = 0.0 if self.mechanism == "none" else self.epsilon_per_round
         round_del = self.delta_per_round if self.mechanism == "gaussian" else 0.0
         # Append placeholder first to compute updated totals cleanly.
