@@ -48,7 +48,7 @@ A clean, modular PyTorch simulator for **Federated Averaging (FedAvg)** under **
 
 ## Repository Layout
 
-- `config.py` — Validated `SimulationConfig` dataclass with CLI defaults.
+- `config.py` — Validated `SimulationConfig` dataclass with CLI defaults; rejects non-finite learning/DP settings and invalid dataset-shape fields (`num_samples`, `num_features`, `num_informative`, `num_classes`).
 - `main.py` — CLI entry point for running simulations.
 - `src/utils.py` — Deterministic seeding, dataset generation, and Dirichlet partitioning.
 - `src/privacy.py` — L2 norm clipping, Laplace/Gaussian DP calibration, and `PrivacyAccountant`.
