@@ -1,6 +1,7 @@
 """Configuration dataclasses for the federated learning simulator."""
 
 from dataclasses import dataclass
+import math
 from typing import Literal
 
 DPMechanism = Literal["laplace", "gaussian", "none"]
@@ -31,6 +32,18 @@ class SimulationConfig:
     seed: int = 42
 
     def __post_init__(self) -> None:
+        for name in (
+            "learning_rate",
+            "momentum",
+            "weight_decay",
+            "alpha",
+            "epsilon",
+            "delta",
+            "clip_norm",
+            "test_size",
+        ):
+            if not math.isfinite(getattr(self, name)):
+                raise ValueError(f"{name} must be finite, got {getattr(self, name)!r}")
         if self.num_clients < 1:
             raise ValueError(f"num_clients must be >= 1, got {self.num_clients}")
         if self.num_rounds < 1:
@@ -55,6 +68,14 @@ class SimulationConfig:
             raise ValueError(f"clip_norm must be > 0, got {self.clip_norm}")
         if not (0.0 < self.test_size < 1.0):
             raise ValueError(f"test_size must be in (0, 1), got {self.test_size}")
+        if self.num_samples < 1:
+            raise ValueError(f"num_samples must be >= 1, got {self.num_samples}")
+        if self.num_features < 1:
+            raise ValueError(f"num_features must be >= 1, got {self.num_features}")
+        if self.num_informative < 1:
+            raise ValueError(f"num_informative must be >= 1, got {self.num_informative}")
+        if self.num_classes < 2:
+            raise ValueError(f"num_classes must be >= 2, got {self.num_classes}")
         if self.num_informative > self.num_features:
             raise ValueError("num_informative cannot exceed num_features")
 

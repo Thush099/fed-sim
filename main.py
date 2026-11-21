@@ -2,10 +2,11 @@
 
 import argparse
 import logging
+import math
 from typing import Optional, Sequence
 
 from config import SimulationConfig
-from src.pipeline import FederatedLearningPipeline
+from src.pipeline import FederatedLearningPipeline, SimulationResult
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,7 +50,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Per-client L2 update clipping threshold",
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument(
+        "--min-accuracy",
+        type=float,
+        default=None,
+        help=(
+            "Exit non-zero when the final round's test accuracy is below this "
+            "threshold in [0, 1], so the simulation can gate a CI job."
+        ),
+    )
     return parser
+
+
+def exit_code_for(result: "SimulationResult", min_accuracy: Optional[float]) -> int:
+    """Map a simulation result to a process exit code under an accuracy gate.
+
+    Returns 0 when no threshold is given or the final accuracy meets it, and 1
+    when the final round's test accuracy is below the threshold. The threshold
+    must be a finite value in [0, 1]; anything else raises ``ValueError`` so a
+    typo cannot silently disable gating.
+    """
+    if min_accuracy is None:
+        return 0
+    if not math.isfinite(min_accuracy) or not 0.0 <= min_accuracy <= 1.0:
+        raise ValueError(
+            "min_accuracy must be a finite value in [0, 1]; "
+            f"got {min_accuracy!r}"
+        )
+    return 1 if result.final_accuracy < min_accuracy else 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -82,7 +110,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         f"(loss={result.final_loss:.4f}, mean_drift={last.mean_client_drift:.4f}, "
         f"cum_eps={last.privacy.cumulative_epsilon_composed:.2f})"
     )
-    return 0
+    return exit_code_for(result, args.min_accuracy)
 
 
 if __name__ == "__main__":
