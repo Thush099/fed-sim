@@ -78,6 +78,11 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { transition: none !important; animation: none !important; }
   }
+  .tradeoff-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tradeoff-actions button { padding: 9px 15px; font: 600 13px/1 var(--sans); background: var(--privacy); color: #170a2e; border-radius: 6px; }
+  .tradeoff-actions button:disabled { opacity: .55; cursor: progress; }
+  #tradeoff-chart { margin: 4px 0 10px; }
+  .point-lab { font-size: 10px; fill: var(--ink-soft); }
 </style>
 </head>
 <body>
@@ -120,6 +125,20 @@
     <button type="submit" id="run">Run simulation</button>
     <div class="error" id="error" role="alert" hidden></div>
   </form>
+
+  <section class="panel" id="tradeoff-panel">
+    <h2>Privacy–utility tradeoff</h2>
+    <p class="meta">The core lesson: lowering ε strengthens the privacy guarantee but injects more
+      noise, so accuracy falls. Every point is a <strong>genuine simulation run</strong> at a fixed seed —
+      nothing is smoothed or interpolated.</p>
+    <div class="tradeoff-actions">
+      <button type="button" id="tradeoff-btn">Compute tradeoff curve</button>
+      <span class="meta" id="tradeoff-status"></span>
+    </div>
+    <div class="error" id="tradeoff-error" role="alert" hidden></div>
+    <div id="tradeoff-chart"></div>
+    <div class="wrap"><table id="tradeoff-table"></table></div>
+  </section>
 
   <section>
     <div class="panel" id="summary-panel" hidden>
@@ -210,6 +229,80 @@
     $("rounds-panel").hidden = false;
   }
 
+  function renderTradeoff(data) {
+    const pts = data.points;
+    const W = 900, H = 320, pad = 52;
+    const lg = (e) => Math.log10(e);
+    const xs = pts.map((p) => lg(p.epsilon));
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const spanX = (maxX - minX) || 1;
+    const x = (eps) => pad + (W - 2 * pad) * ((lg(eps) - minX) / spanX);
+    const y = (v) => H - pad - (H - 2 * pad) * Math.max(0, Math.min(1, v));
+    const accPts = pts.map((p) => `${x(p.epsilon).toFixed(1)},${y(p.final_accuracy).toFixed(1)}`).join(" ");
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => {
+      const yy = y(f).toFixed(1);
+      return `<line x1="${pad}" x2="${W - pad}" y1="${yy}" y2="${yy}" stroke="var(--rule)"/>
+              <text x="10" y="${Number(yy) + 4}" font-size="10" fill="var(--ink-soft)">${f.toFixed(2)}</text>`;
+    }).join("");
+    const marks = pts.map((p) => {
+      const cx = x(p.epsilon), cy = y(p.final_accuracy);
+      return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="var(--acc)"/>
+              <text class="point-lab" x="${cx.toFixed(1)}" y="${(cy - 11).toFixed(1)}" text-anchor="middle">${(p.final_accuracy * 100).toFixed(0)}%</text>
+              <text class="point-lab" x="${cx.toFixed(1)}" y="${(H - pad + 16).toFixed(1)}" text-anchor="middle">ε=${p.epsilon}</text>`;
+    }).join("");
+    $("tradeoff-chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Final accuracy rises as the privacy budget epsilon increases">
+      ${grid}
+      <polyline points="${accPts}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${marks}
+      <text x="${pad}" y="${H - 8}" font-size="11" fill="var(--ink-soft)">privacy budget ε (log scale) — low ε = strong privacy · high ε = weak privacy</text>
+      <text x="8" y="${pad - 14}" font-size="11" fill="var(--ink-soft)">accuracy</text>
+    </svg>`;
+    $("tradeoff-table").innerHTML =
+      `<thead><tr><th>ε (privacy budget)</th><th>Final accuracy</th><th>Final loss</th><th>Noise L2</th><th>Noise scale</th></tr></thead><tbody>` +
+      pts.map((p) => `<tr>
+        <td class="num">${num(p.epsilon, 2)}</td>
+        <td class="num">${num(p.final_accuracy)}</td>
+        <td class="num">${num(p.final_loss, 4)}</td>
+        <td class="num">${num(p.noise_l2_norm)}</td>
+        <td class="num">${num(p.noise_scale, 4)}</td>
+      </tr>`).join("") + `</tbody>`;
+  }
+
+  async function computeTradeoff() {
+    const btn = $("tradeoff-btn");
+    btn.disabled = true; btn.textContent = "Computing…";
+    $("tradeoff-status").textContent = "Running 6 simulations across ε — takes ~30s.";
+    $("tradeoff-error").hidden = true;
+    try {
+      const res = await fetch("/api/privacy_curve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dp_mechanism: $("dp_mechanism").value,
+          num_clients: Number($("num_clients").value),
+          num_rounds: 5,
+          local_epochs: Number($("local_epochs").value),
+          learning_rate: Number($("learning_rate").value),
+          alpha: Number($("alpha").value),
+          delta: Number($("delta").value),
+          clip_norm: Number($("clip_norm").value),
+          seed: Number($("seed").value),
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || `Request failed (${res.status})`);
+      renderTradeoff(payload);
+      $("tradeoff-status").textContent = `Done — ${payload.points.length} real runs at ${payload.dp_mechanism}.`;
+    } catch (err) {
+      $("tradeoff-error").textContent = err.message;
+      $("tradeoff-error").hidden = false;
+      $("tradeoff-status").textContent = "";
+    } finally {
+      btn.disabled = false; btn.textContent = "Compute tradeoff curve";
+    }
+  }
+  $("tradeoff-btn").addEventListener("click", computeTradeoff);
+
+  let tradeoffDone = false;
   $("form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const btn = $("run");
@@ -245,6 +338,7 @@
     } finally {
       btn.disabled = false; btn.textContent = "Run simulation";
     }
+    if (!tradeoffDone) { tradeoffDone = true; computeTradeoff(); }
   });
 
   $("form").dispatchEvent(new Event("submit"));

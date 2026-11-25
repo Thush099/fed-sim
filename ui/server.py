@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,6 +26,10 @@ INDEX_HTML = (REPO_ROOT / "ui" / "index.html").read_text(encoding="utf-8")
 
 DP_MECHANISMS = ("laplace", "gaussian")
 
+# Privacy budgets swept to draw the privacy-utility tradeoff. Lower epsilon = stronger
+# privacy = more noise = lower accuracy. Spanning 1..32 shows collapse -> recovery.
+DEFAULT_EPSILON_SWEEP = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0)
+
 
 def run_simulation(
     num_clients: int = 5,
@@ -32,8 +37,8 @@ def run_simulation(
     local_epochs: int = 3,
     learning_rate: float = 0.15,
     alpha: float = 0.5,
-    dp_mechanism: str = "laplace",
-    epsilon: float = 2.0,
+    dp_mechanism: str = "gaussian",
+    epsilon: float = 8.0,
     delta: float = 1e-5,
     clip_norm: float = 1.0,
     seed: int = 42,
@@ -103,6 +108,75 @@ def run_simulation(
     }
 
 
+def privacy_utility_curve(
+    dp_mechanism: str = "gaussian",
+    epsilons: Optional[Sequence[float]] = None,
+    num_clients: int = 5,
+    num_rounds: int = 5,
+    local_epochs: int = 3,
+    learning_rate: float = 0.15,
+    alpha: float = 0.5,
+    delta: float = 1e-5,
+    clip_norm: float = 1.0,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Sweep the privacy budget (epsilon) and report the resulting model utility.
+
+    Runs the real simulation once per epsilon at a fixed seed and fixed model/data
+    config, so the only varying factor is the DP noise level. Lower epsilon means
+    stronger privacy, more injected noise, and lower accuracy -- the privacy-utility
+    tradeoff this simulator exists to expose. Every point is a genuine run; nothing is
+    smoothed or interpolated.
+
+    Raises ValueError with a clear message for invalid mechanism or epsilon values.
+    """
+    if dp_mechanism not in DP_MECHANISMS:
+        raise ValueError(f"dp_mechanism must be one of {list(DP_MECHANISMS)}, got {dp_mechanism!r}")
+    if epsilons is None:
+        epsilons = DEFAULT_EPSILON_SWEEP
+    if not isinstance(epsilons, (list, tuple)) or len(epsilons) < 2:
+        raise ValueError("epsilons must be a list of at least 2 positive epsilon values")
+
+    points: list[dict[str, Any]] = []
+    for eps in epsilons:
+        if (
+            isinstance(eps, bool)
+            or not isinstance(eps, (int, float))
+            or not math.isfinite(eps)
+            or eps <= 0
+        ):
+            raise ValueError(f"each epsilon must be a finite positive number, got {eps!r}")
+        run = run_simulation(
+            num_clients=num_clients,
+            num_rounds=num_rounds,
+            local_epochs=local_epochs,
+            learning_rate=learning_rate,
+            alpha=alpha,
+            dp_mechanism=dp_mechanism,
+            epsilon=float(eps),
+            delta=delta,
+            clip_norm=clip_norm,
+            seed=seed,
+        )
+        last = run["rounds"][-1]
+        points.append(
+            {
+                "epsilon": float(eps),
+                "final_accuracy": run["final_accuracy"],
+                "final_loss": run["final_loss"],
+                "noise_scale": last["noise_scale"],
+                "noise_l2_norm": last["noise_l2_norm"],
+            }
+        )
+    return {
+        "dp_mechanism": dp_mechanism,
+        "num_clients": num_clients,
+        "num_rounds": num_rounds,
+        "seed": seed,
+        "points": points,
+    }
+
+
 def build_server(host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
     """Create (but do not start) the UI HTTP server bound to ``host:port``."""
 
@@ -132,7 +206,7 @@ def build_server(host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
                 self._send_json({"error": f"unknown path: {self.path}"}, status=404)
 
         def do_POST(self) -> None:
-            if self.path != "/api/run":
+            if self.path not in ("/api/run", "/api/privacy_curve"):
                 self._send_json({"error": f"unknown path: {self.path}"}, status=404)
                 return
             try:
@@ -140,18 +214,32 @@ def build_server(host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
                 payload = json.loads(self.rfile.read(length) or b"{}")
                 if not isinstance(payload, dict):
                     raise ValueError("request body must be a JSON object")
-                result = run_simulation(
-                    num_clients=payload.get("num_clients", 5),
-                    num_rounds=payload.get("num_rounds", 10),
-                    local_epochs=payload.get("local_epochs", 3),
-                    learning_rate=payload.get("learning_rate", 0.15),
-                    alpha=payload.get("alpha", 0.5),
-                    dp_mechanism=payload.get("dp_mechanism", "laplace"),
-                    epsilon=payload.get("epsilon", 2.0),
-                    delta=payload.get("delta", 1e-5),
-                    clip_norm=payload.get("clip_norm", 1.0),
-                    seed=payload.get("seed", 42),
-                )
+                if self.path == "/api/run":
+                    result = run_simulation(
+                        num_clients=payload.get("num_clients", 5),
+                        num_rounds=payload.get("num_rounds", 10),
+                        local_epochs=payload.get("local_epochs", 3),
+                        learning_rate=payload.get("learning_rate", 0.15),
+                        alpha=payload.get("alpha", 0.5),
+                        dp_mechanism=payload.get("dp_mechanism", "gaussian"),
+                        epsilon=payload.get("epsilon", 8.0),
+                        delta=payload.get("delta", 1e-5),
+                        clip_norm=payload.get("clip_norm", 1.0),
+                        seed=payload.get("seed", 42),
+                    )
+                else:
+                    result = privacy_utility_curve(
+                        dp_mechanism=payload.get("dp_mechanism", "gaussian"),
+                        epsilons=payload.get("epsilons"),
+                        num_clients=payload.get("num_clients", 5),
+                        num_rounds=payload.get("num_rounds", 5),
+                        local_epochs=payload.get("local_epochs", 3),
+                        learning_rate=payload.get("learning_rate", 0.15),
+                        alpha=payload.get("alpha", 0.5),
+                        delta=payload.get("delta", 1e-5),
+                        clip_norm=payload.get("clip_norm", 1.0),
+                        seed=payload.get("seed", 42),
+                    )
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
                 self._send_json({"error": str(exc)}, status=400)
                 return

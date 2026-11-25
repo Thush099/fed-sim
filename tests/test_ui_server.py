@@ -7,7 +7,7 @@ import urllib.request
 
 import pytest
 
-from ui.server import build_server, run_simulation
+from ui.server import build_server, privacy_utility_curve, run_simulation
 
 
 @pytest.fixture()
@@ -87,3 +87,67 @@ def test_index_has_accessibility_features(server):
     assert '<main class="layout">' in html, "missing main landmark"
     assert 'role="alert"' in html, "error box must announce to assistive tech"
     assert "prefers-reduced-motion" in html, "missing reduced-motion guard"
+
+
+def _post_path(base: str, path: str, payload: dict) -> tuple[int, dict]:
+    request = urllib.request.Request(
+        f"{base}{path}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        response = urllib.request.urlopen(request)
+        return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def test_privacy_utility_curve_shows_honest_tradeoff():
+    """Accuracy must be higher under a weaker privacy budget (larger epsilon)."""
+    curve = privacy_utility_curve(
+        dp_mechanism="gaussian",
+        epsilons=(2.0, 32.0),
+        num_clients=3,
+        num_rounds=3,
+        seed=7,
+    )
+    assert curve["dp_mechanism"] == "gaussian"
+    assert len(curve["points"]) == 2
+    low, high = curve["points"]
+    assert low["epsilon"] == 2.0 and high["epsilon"] == 32.0
+    # Stronger privacy (eps=2) must not beat weaker privacy (eps=32) on accuracy.
+    assert high["final_accuracy"] > low["final_accuracy"] + 0.2
+    # Lower epsilon injects strictly more noise.
+    assert low["noise_l2_norm"] > high["noise_l2_norm"]
+
+
+def test_privacy_utility_curve_is_json_serializable():
+    curve = privacy_utility_curve(dp_mechanism="laplace", epsilons=(1.0, 4.0), num_rounds=2, seed=1)
+    assert json.dumps(curve)
+    assert set(curve["points"][0]) == {
+        "epsilon", "final_accuracy", "final_loss", "noise_scale", "noise_l2_norm"
+    }
+
+
+@pytest.mark.parametrize(
+    "payload,message",
+    [
+        ({"dp_mechanism": "nope"}, "dp_mechanism"),
+        ({"epsilons": [2.0, -1.0]}, "finite positive"),
+        ({"epsilons": [2.0]}, "at least 2"),
+    ],
+)
+def test_privacy_curve_rejects_bad_input_with_clear_message(server, payload, message):
+    status, body = _post_path(server, "/api/privacy_curve", payload)
+    assert status == 400
+    assert message in body["error"]
+
+
+def test_privacy_curve_endpoint_returns_real_runs(server):
+    status, body = _post_path(
+        server, "/api/privacy_curve",
+        {"dp_mechanism": "gaussian", "epsilons": [2.0, 32.0], "num_clients": 3, "num_rounds": 3, "seed": 7},
+    )
+    assert status == 200
+    assert len(body["points"]) == 2
+    assert body["points"][1]["final_accuracy"] > body["points"][0]["final_accuracy"]
