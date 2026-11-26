@@ -151,3 +151,11 @@ def test_privacy_curve_endpoint_returns_real_runs(server):
     assert status == 200
     assert len(body["points"]) == 2
     assert body["points"][1]["final_accuracy"] > body["points"][0]["final_accuracy"]
+
+
+def test_index_has_loading_and_theme_states(server):
+    """The page shows busy feedback during a run and declares its dark-first color scheme."""
+    html = urllib.request.urlopen(server + "/").read().decode("utf-8")
+    assert 'aria-busy' in html, "form must announce busy state during a run"
+    assert 'class="spinner"' in html, "missing visible busy indicator"
+    assert "color-scheme: dark" in html, "dark-first page must declare its color scheme"
