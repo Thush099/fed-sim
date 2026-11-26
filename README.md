@@ -1,5 +1,7 @@
 # fed-sim: Federated Learning Simulator with Differential Privacy
 
+[![CI](https://github.com/Thush099/fed-sim/actions/workflows/tests.yml/badge.svg)](https://github.com/Thush099/fed-sim/actions/workflows/tests.yml)
+
 A clean, modular PyTorch simulator for **Federated Averaging (FedAvg)** under **Dirichlet non-IID client splits**, **per-client L2 update clipping**, **calibrated Laplace / Gaussian differential privacy**, and **per-client parameter drift tracking**.
 
 ## Architecture
