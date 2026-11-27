@@ -193,3 +193,10 @@ def test_tradeoff_busy_wiring_is_form_independent(server):
     handler = html[start:end]
     assert "btn.form" not in handler, "computeTradeoff must not depend on btn.form"
     assert 'querySelector(".spinner")' in handler, "the tradeoff spinner must be scoped to its own row"
+
+
+def test_index_disables_heuristic_caching(server):
+    """The UI shell must not be heuristically cached — stale HTML after edits was
+    observed live because custom do_GET handlers send no cache validators."""
+    resp = urllib.request.urlopen(server + "/")
+    assert resp.headers.get("Cache-Control") == "no-cache"
