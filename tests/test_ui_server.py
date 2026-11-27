@@ -200,3 +200,13 @@ def test_index_disables_heuristic_caching(server):
     observed live because custom do_GET handlers send no cache validators."""
     resp = urllib.request.urlopen(server + "/")
     assert resp.headers.get("Cache-Control") == "no-cache"
+
+
+def test_baseline_pin_persists_across_reloads(server):
+    """A pinned baseline must survive a page reload (localStorage), so runs can be
+    compared across sessions without re-pinning."""
+    html = urllib.request.urlopen(server + "/").read().decode("utf-8")
+    assert "fedsim-pinned-baseline" in html, "missing the baseline storage key"
+    assert "localStorage.setItem" in html and "localStorage.getItem" in html, (
+        "baseline pin must persist and restore"
+    )

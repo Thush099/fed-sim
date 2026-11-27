@@ -246,8 +246,16 @@
     $("rounds-panel").hidden = false;
   }
 
+  const BASELINE_KEY = "fedsim-pinned-baseline";
   let lastCurve = null;
   let pinnedCurve = null;
+  try {
+    const saved = window.localStorage.getItem(BASELINE_KEY);
+    if (saved) pinnedCurve = JSON.parse(saved);
+  } catch {
+    pinnedCurve = null;
+  }
+  if (pinnedCurve) $("clear-baseline").disabled = false;
 
   function renderTradeoff(data) {
     const pts = data.points;
@@ -277,7 +285,7 @@
       <polyline points="${accPts}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${marks}
       <text x="${pad}" y="${H - 8}" font-size="11" fill="var(--ink-soft)">privacy budget ε (log scale) — low ε = strong privacy · high ε = weak privacy</text>
       <text x="8" y="${pad - 14}" font-size="11" fill="var(--ink-soft)">accuracy</text>
-      ${base.length ? `<text x="${W - pad - 250}" y="${pad - 16}" font-size="11" fill="var(--ink-soft)">dashed: pinned baseline · solid: current run</text>` : ""}
+      ${base.length ? `<text x="${W - pad - 250}" y="${pad - 16}" font-size="11" fill="var(--ink-soft)">dashed: pinned baseline (${pinnedCurve.dp_mechanism || "?"}) · solid: current run</text>` : ""}
     </svg>`;
     $("tradeoff-table").innerHTML =
       `<thead><tr><th>ε (privacy budget)</th><th>Final accuracy</th><th>Final loss</th><th>Noise L2</th><th>Noise scale</th></tr></thead><tbody>` +
@@ -335,12 +343,14 @@
   $("pin-baseline").addEventListener("click", () => {
     if (!lastCurve) return;
     pinnedCurve = lastCurve;
+    try { window.localStorage.setItem(BASELINE_KEY, JSON.stringify(lastCurve)); } catch { /* storage unavailable */ }
     $("clear-baseline").disabled = false;
     renderTradeoff(lastCurve);
     $("tradeoff-status").textContent = "Baseline pinned — future runs draw it dashed for comparison.";
   });
   $("clear-baseline").addEventListener("click", () => {
     pinnedCurve = null;
+    try { window.localStorage.removeItem(BASELINE_KEY); } catch { /* storage unavailable */ }
     $("clear-baseline").disabled = true;
     if (lastCurve) renderTradeoff(lastCurve);
     $("tradeoff-status").textContent = "Baseline cleared.";
