@@ -159,3 +159,18 @@ def test_index_has_loading_and_theme_states(server):
     assert 'aria-busy' in html, "form must announce busy state during a run"
     assert 'class="spinner"' in html, "missing visible busy indicator"
     assert "color-scheme: dark" in html, "dark-first page must declare its color scheme"
+
+
+def test_oversized_declared_body_is_rejected_not_hung(server):
+    """A lying Content-Length must get a fast 413, never park a handler thread."""
+    import socket
+    from urllib.parse import urlparse
+
+    u = urlparse(server)
+    with socket.create_connection((u.hostname, u.port), timeout=5) as sock:
+        sock.sendall(
+            b"POST /api/run HTTP/1.1\r\nHost: t\r\nContent-Type: application/json\r\n"
+            b"Content-Length: 999999999\r\n\r\n{}"
+        )
+        first = sock.recv(4096).split(b"\r\n", 1)[0]
+    assert b"413" in first, f"expected 413 for oversized body, got {first!r}"
