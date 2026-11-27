@@ -147,6 +147,9 @@
       nothing is smoothed or interpolated.</p>
     <div class="tradeoff-actions">
       <button type="button" id="tradeoff-btn">Compute tradeoff curve</button>
+      <button type="button" id="pin-baseline" disabled>Pin as baseline</button>
+      <button type="button" id="clear-baseline" disabled>Clear baseline</button>
+      <span class="spinner" hidden aria-hidden="true"></span>
       <span class="meta" id="tradeoff-status"></span>
     </div>
     <div class="error" id="tradeoff-error" role="alert" hidden></div>
@@ -243,11 +246,16 @@
     $("rounds-panel").hidden = false;
   }
 
+  let lastCurve = null;
+  let pinnedCurve = null;
+
   function renderTradeoff(data) {
     const pts = data.points;
     const W = 900, H = 320, pad = 52;
     const lg = (e) => Math.log10(e);
-    const xs = pts.map((p) => lg(p.epsilon));
+    const base = (typeof pinnedCurve !== "undefined" && pinnedCurve && pinnedCurve !== data)
+      ? pinnedCurve.points : [];
+    const xs = [...pts, ...base].map((p) => lg(p.epsilon));
     const minX = Math.min(...xs), maxX = Math.max(...xs);
     const spanX = (maxX - minX) || 1;
     const x = (eps) => pad + (W - 2 * pad) * ((lg(eps) - minX) / spanX);
@@ -265,10 +273,11 @@
               <text class="point-lab" x="${cx.toFixed(1)}" y="${(H - pad + 16).toFixed(1)}" text-anchor="middle">ε=${p.epsilon}</text>`;
     }).join("");
     $("tradeoff-chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Final accuracy rises as the privacy budget epsilon increases">
-      ${grid}
+      ${grid}${base.length ? `<polyline points="${base.map((p) => `${x(p.epsilon)},${y(p.final_accuracy)}`).join(" ")}" fill="none" stroke="var(--ink-soft)" stroke-width="2" stroke-dasharray="6 4"/>` : ""}
       <polyline points="${accPts}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${marks}
       <text x="${pad}" y="${H - 8}" font-size="11" fill="var(--ink-soft)">privacy budget ε (log scale) — low ε = strong privacy · high ε = weak privacy</text>
       <text x="8" y="${pad - 14}" font-size="11" fill="var(--ink-soft)">accuracy</text>
+      ${base.length ? `<text x="${W - pad - 250}" y="${pad - 16}" font-size="11" fill="var(--ink-soft)">dashed: pinned baseline · solid: current run</text>` : ""}
     </svg>`;
     $("tradeoff-table").innerHTML =
       `<thead><tr><th>ε (privacy budget)</th><th>Final accuracy</th><th>Final loss</th><th>Noise L2</th><th>Noise scale</th></tr></thead><tbody>` +
@@ -283,9 +292,10 @@
 
   async function computeTradeoff() {
     const btn = $("tradeoff-btn");
+    const scope = btn.closest(".panel");
+    const spinner = btn.parentElement.querySelector(".spinner");
     btn.disabled = true; btn.textContent = "Computing…";
-    btn.form.setAttribute("aria-busy", "true");
-    const spinner = document.querySelector(".spinner");
+    if (scope) scope.setAttribute("aria-busy", "true");
     spinner.hidden = false;
     $("tradeoff-status").textContent = "Running 6 simulations across ε — takes ~30s.";
     $("tradeoff-error").hidden = true;
@@ -307,6 +317,8 @@
       });
       const payload = await res.json();
       if (!res.ok) throw new Error(payload.error || `Request failed (${res.status})`);
+      lastCurve = payload;
+      $("pin-baseline").disabled = false;
       renderTradeoff(payload);
       $("tradeoff-status").textContent = `Done — ${payload.points.length} real runs at ${payload.dp_mechanism}.`;
     } catch (err) {
@@ -315,11 +327,24 @@
       $("tradeoff-status").textContent = "";
     } finally {
       btn.disabled = false; btn.textContent = "Compute tradeoff curve";
-      btn.form.setAttribute("aria-busy", "false");
+      if (scope) scope.setAttribute("aria-busy", "false");
       spinner.hidden = true;
     }
   }
   $("tradeoff-btn").addEventListener("click", computeTradeoff);
+  $("pin-baseline").addEventListener("click", () => {
+    if (!lastCurve) return;
+    pinnedCurve = lastCurve;
+    $("clear-baseline").disabled = false;
+    renderTradeoff(lastCurve);
+    $("tradeoff-status").textContent = "Baseline pinned — future runs draw it dashed for comparison.";
+  });
+  $("clear-baseline").addEventListener("click", () => {
+    pinnedCurve = null;
+    $("clear-baseline").disabled = true;
+    if (lastCurve) renderTradeoff(lastCurve);
+    $("tradeoff-status").textContent = "Baseline cleared.";
+  });
 
   let tradeoffDone = false;
   $("form").addEventListener("submit", async (e) => {
