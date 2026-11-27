@@ -326,6 +326,9 @@
     e.preventDefault();
     const btn = $("run");
     btn.disabled = true; btn.textContent = "Running…";
+    btn.form.setAttribute("aria-busy", "true");
+    const spinner = document.querySelector(".spinner");
+    spinner.hidden = false;
     $("error").hidden = true;
     try {
       const res = await fetch("/api/run", {
@@ -356,6 +359,8 @@
       $("error").hidden = false;
     } finally {
       btn.disabled = false; btn.textContent = "Run simulation";
+      btn.form.setAttribute("aria-busy", "false");
+      spinner.hidden = true;
     }
     if (!tradeoffDone) { tradeoffDone = true; computeTradeoff(); }
   });
