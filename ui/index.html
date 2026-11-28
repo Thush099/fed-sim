@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DP-FedAvg Federation Console — privacy vs utility</title>
+<style>
+  :root {
+    --bg: #0c1220;
+    --panel: #131b2c;
+    --panel-2: #1a2438;
+    --ink: #e6ebf4;
+    --ink-soft: #8b98ad;
+    --rule: #243048;
+    --acc: #5b9dff;
+    --privacy: #b98bff;
+    --warn: #ffb454;
+    --bad: #ff6b5e;
+    --good: #4cc38a;
+    --mono: "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); }
+  header { padding: 30px 26px 20px; border-bottom: 1px solid var(--rule);
+           background: radial-gradient(1200px 300px at 20% -40%, #1a2a4d, var(--bg)); }
+  header h1 { margin: 0; font: 600 clamp(22px, 3.4vw, 32px)/1.12 var(--sans); letter-spacing: -.015em; }
+  header h1 em { font-style: normal; color: var(--privacy); }
+  header p { margin: 9px 0 0; max-width: 72ch; color: var(--ink-soft); font-size: 14.5px; }
+  .layout { display: grid; grid-template-columns: minmax(300px, 360px) 1fr; gap: 20px; padding: 20px 26px 56px; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--rule); border-radius: 7px; padding: 18px 20px; }
+  .panel + .panel { margin-top: 16px; }
+  .panel h2 { margin: 0 0 3px; font: 600 17px/1.25 var(--sans); }
+  .meta { margin: 0 0 12px; color: var(--ink-soft); font-size: 12.5px; }
+  label { display: block; font: 600 11px/1 var(--sans); letter-spacing: .07em; text-transform: uppercase; color: var(--ink-soft); margin: 13px 0 6px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  input[type="number"], select {
+    width: 100%; border: 1px solid var(--rule); border-radius: 4px; background: var(--panel-2);
+    color: var(--ink); font: 13px/1.5 var(--mono); padding: 8px 10px;
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+  button { width: 100%; margin-top: 16px; border: 0; border-radius: 5px; cursor: pointer;
+           padding: 13px 14px; font: 600 14.5px/1 var(--sans); background: var(--acc); color: #06142e; }
+  button:hover { background: #4889ec; }
+  button:disabled { opacity: .55; cursor: wait; }
+  .spinner {
+    display: inline-block; width: 1em; height: 1em; margin-left: 8px;
+    border: 2px solid var(--rule); border-top-color: var(--ink);
+    border-radius: 50%; vertical-align: -0.15em;
+    animation: spin 0.8s linear infinite;
+  }
+  .spinner[hidden] { display: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation: none; }
+  }
+
+  .error { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--bad); background: #2a1c1a; color: var(--bad); font-size: 13px; white-space: pre-wrap; }
+
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 7px; overflow: hidden; }
+  .stat { background: var(--panel); padding: 13px 15px; }
+  .stat .k { font: 600 10.5px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); }
+  .stat .v { font: 600 23px/1.15 var(--mono); margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .stat .v.privacy { color: var(--privacy); }
+  .stat .v.good { color: var(--good); } .stat .v.bad { color: var(--bad); }
+
+  svg { width: 100%; height: auto; display: block; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 10px 0 0; font-size: 12.5px; color: var(--ink-soft); }
+  .legend span { display: flex; align-items: center; gap: 7px; }
+  .swatch { width: 13px; height: 4px; border-radius: 2px; display: inline-block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 8px 9px; border-bottom: 1px solid var(--rule); }
+  th { font: 600 10px/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--ink-soft); background: var(--panel-2); }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .wrap { overflow-x: auto; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font: 600 10.5px/1.7 var(--sans); }
+  .pill.clipped { background: #352c15; color: var(--warn); }
+  .pill.none { background: var(--panel-2); color: var(--ink-soft); }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; font-size: 12.5px; color: var(--acc); font-weight: 600; }
+  pre { background: #0a0f1c; color: #d6dae0; padding: 12px; border-radius: 4px; overflow: auto; font: 11px/1.5 var(--mono); max-height: 300px; }
+  .skip-link {
+    position: absolute; left: -9999px; top: 0; z-index: 100;
+    background: var(--accent, #2b6cb0); color: #fff; padding: 10px 16px;
+    border-radius: 0 0 6px 0; font: 600 13px/1 var(--sans); text-decoration: none;
+  }
+  .skip-link:focus { left: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+  }
+  .tradeoff-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tradeoff-actions button { padding: 9px 15px; font: 600 13px/1 var(--sans); background: var(--privacy); color: #170a2e; border-radius: 6px; }
+  .tradeoff-actions button:disabled { opacity: .55; cursor: progress; }
+  #tradeoff-chart { margin: 4px 0 10px; }
+  .point-lab { font-size: 10px; fill: var(--ink-soft); }
+</style>
+</head>
+<body>
+<a class="skip-link" href="#form">Skip to controls</a>
+<header>
+  <h1>DP-FedAvg <em>federation console</em></h1>
+  <p>Simulate federated learning across heterogeneous clients with differentially private
+  aggregation. Tune the privacy budget and watch the utility cost — clipped updates and
+  injected noise trade accuracy for a formal ε guarantee.</p>
+</header>
+
+<main class="layout">
+  <form class="panel" id="form">
+    <h2>Simulation</h2>
+    <p class="meta">Runs <code>FederatedLearningPipeline.run()</code> from <code>src/pipeline.py</code>.</p>
+
+    <div class="grid2">
+      <div><label for="num_clients">Clients</label><input type="number" id="num_clients" value="5" min="2" max="50"></div>
+      <div><label for="num_rounds">Rounds</label><input type="number" id="num_rounds" value="8" min="1" max="50"></div>
+      <div><label for="local_epochs">Local epochs</label><input type="number" id="local_epochs" value="3" min="1" max="20"></div>
+      <div><label for="learning_rate">Learning rate</label><input type="number" id="learning_rate" value="0.15" step="0.01"></div>
+    </div>
+
+    <label for="alpha">Client heterogeneity (α)</label>
+    <input type="number" id="alpha" value="0.5" step="0.05" min="0.01" max="100">
+
+    <label for="dp_mechanism">DP mechanism</label>
+    <select id="dp_mechanism">
+      <option value="laplace" selected>laplace</option>
+      <option value="gaussian">gaussian</option>
+    </select>
+
+    <div class="grid2">
+      <div><label for="epsilon">Privacy budget ε</label><input type="number" id="epsilon" value="2.0" step="0.1" min="0.01"></div>
+      <div><label for="delta">Delta δ</label><input type="number" id="delta" value="0.00001" step="0.00001"></div>
+      <div><label for="clip_norm">Clip norm</label><input type="number" id="clip_norm" value="1.0" step="0.1" min="0.01"></div>
+      <div><label for="seed">Seed</label><input type="number" id="seed" value="42"></div>
+    </div>
+
+    <button type="submit" id="run">Run simulation</button>
+      <span class="spinner" hidden aria-hidden="true"></span>
+    <div class="error" id="error" role="alert" hidden></div>
+  </form>
+
+  <section class="panel" id="tradeoff-panel">
+    <h2>Privacy–utility tradeoff</h2>
+    <p class="meta">The core lesson: lowering ε strengthens the privacy guarantee but injects more
+      noise, so accuracy falls. Every point is a <strong>genuine simulation run</strong> at a fixed seed —
+      nothing is smoothed or interpolated.</p>
+    <div class="tradeoff-actions">
+      <button type="button" id="tradeoff-btn">Compute tradeoff curve</button>
+      <button type="button" id="pin-baseline" disabled>Pin as baseline</button>
+      <button type="button" id="clear-baseline" disabled>Clear baseline</button>
+      <span class="spinner" hidden aria-hidden="true"></span>
+      <span class="meta" id="tradeoff-status"></span>
+    </div>
+    <div class="error" id="tradeoff-error" role="alert" hidden></div>
+    <div id="tradeoff-chart"></div>
+    <div class="wrap"><table id="tradeoff-table"></table></div>
+  </section>
+
+  <section>
+    <div class="panel" id="summary-panel" hidden>
+      <div class="statgrid" id="statgrid"></div>
+    </div>
+
+    <div class="panel" id="chart-panel" hidden>
+      <h2>Accuracy &amp; privacy per round</h2>
+      <p class="meta">Test accuracy against cumulative noise injected — the privacy–utility tradeoff.</p>
+      <div id="chart"></div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--acc)"></i> test accuracy</span>
+        <span><i class="swatch" style="background:var(--privacy)"></i> noise L2 norm</span>
+      </div>
+    </div>
+
+    <div class="panel" id="rounds-panel" hidden>
+      <h2>Round detail</h2>
+      <div class="wrap"><table id="rounds-table"></table></div>
+    </div>
+
+    <details id="raw-details" hidden>
+      <summary>Show raw JSON result</summary>
+      <pre id="raw"></pre>
+    </details>
+  </section>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const num = (x, d = 3) => x == null ? "—" : Number(x).toFixed(d);
+
+  function renderSummary(r) {
+    const improved = r.final_accuracy >= r.initial_accuracy;
+    const stats = [
+      ["Rounds run", r.config.num_rounds],
+      ["Clients", r.config.num_clients],
+      ["Accuracy", `${num(r.initial_accuracy)} → ${num(r.final_accuracy)}`, improved ? "good" : "bad"],
+      ["Final loss", num(r.final_loss, 4)],
+      ["Privacy budget ε", num(r.config.epsilon, 2), "privacy"],
+      ["Mechanism", r.config.dp_mechanism],
+    ];
+    $("statgrid").innerHTML = stats.map(([k, v, cls]) =>
+      `<div class="stat"><div class="k">${esc(k)}</div><div class="v ${cls || ""}">${esc(v)}</div></div>`).join("");
+    $("summary-panel").hidden = false;
+  }
+
+  function renderChart(rounds) {
+    const W = 900, H = 300, pad = 44;
+    const maxNoise = Math.max(...rounds.map((r) => r.noise_l2_norm), 0.01) * 1.15;
+    const x = (i) => pad + (W - 2 * pad) * (i / Math.max(rounds.length - 1, 1));
+    const yAcc = (v) => H - pad - (H - 2 * pad) * v;
+    const yNoise = (v) => H - pad - (H - 2 * pad) * (v / maxNoise);
+
+    const accPts = rounds.map((r, i) => `${x(i).toFixed(1)},${yAcc(r.test_accuracy).toFixed(1)}`).join(" ");
+    const noisePts = rounds.map((r, i) => `${x(i).toFixed(1)},${yNoise(r.noise_l2_norm).toFixed(1)}`).join(" ");
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => {
+      const yy = yAcc(f).toFixed(1);
+      return `<line x1="${pad}" x2="${W - pad}" y1="${yy}" y2="${yy}" stroke="var(--rule)"/>
+              <text x="8" y="${Number(yy) + 4}" font-size="10" fill="var(--ink-soft)">${f.toFixed(2)}</text>`;
+    }).join("");
+    const dots = rounds.map((r, i) =>
+      `<circle cx="${x(i).toFixed(1)}" cy="${yAcc(r.test_accuracy).toFixed(1)}" r="3.5" fill="var(--acc)"/>`).join("");
+
+    $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Test accuracy and noise per round">
+      ${grid}
+      <polyline points="${noisePts}" fill="none" stroke="var(--privacy)" stroke-width="2" stroke-dasharray="5 4"/>
+      <polyline points="${accPts}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${dots}
+      <text x="${pad}" y="${H - 10}" font-size="11" fill="var(--ink-soft)">round 1 … ${rounds.length}</text>
+    </svg>`;
+    $("chart-panel").hidden = false;
+  }
+
+  function renderRounds(rounds) {
+    $("rounds-table").innerHTML =
+      `<thead><tr><th>Round</th><th>Accuracy</th><th>Loss</th><th>Mean drift</th><th>Max drift</th><th>Noise L2</th><th>Clipped</th></tr></thead><tbody>` +
+      rounds.map((r) => `<tr>
+        <td class="num">${r.round_idx}</td>
+        <td class="num">${num(r.test_accuracy)}</td>
+        <td class="num">${num(r.test_loss, 4)}</td>
+        <td class="num">${num(r.mean_client_drift)}</td>
+        <td class="num">${num(r.max_client_drift)}</td>
+        <td class="num">${num(r.noise_l2_norm)}</td>
+        <td>${r.clipped_clients ? `<span class="pill clipped">${r.clipped_clients}</span>` : `<span class="pill none">0</span>`}</td>
+      </tr>`).join("") + `</tbody>`;
+    $("rounds-panel").hidden = false;
+  }
+
+  const BASELINE_KEY = "fedsim-pinned-baseline";
+  let lastCurve = null;
+  let pinnedCurve = null;
+  try {
+    const saved = window.localStorage.getItem(BASELINE_KEY);
+    if (saved) pinnedCurve = JSON.parse(saved);
+  } catch {
+    pinnedCurve = null;
+  }
+  if (pinnedCurve) $("clear-baseline").disabled = false;
+
+  function renderTradeoff(data) {
+    const pts = data.points;
+    const W = 900, H = 320, pad = 52;
+    const lg = (e) => Math.log10(e);
+    const base = (typeof pinnedCurve !== "undefined" && pinnedCurve && pinnedCurve !== data)
+      ? pinnedCurve.points : [];
+    const xs = [...pts, ...base].map((p) => lg(p.epsilon));
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const spanX = (maxX - minX) || 1;
+    const x = (eps) => pad + (W - 2 * pad) * ((lg(eps) - minX) / spanX);
+    const y = (v) => H - pad - (H - 2 * pad) * Math.max(0, Math.min(1, v));
+    const accPts = pts.map((p) => `${x(p.epsilon).toFixed(1)},${y(p.final_accuracy).toFixed(1)}`).join(" ");
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => {
+      const yy = y(f).toFixed(1);
+      return `<line x1="${pad}" x2="${W - pad}" y1="${yy}" y2="${yy}" stroke="var(--rule)"/>
+              <text x="10" y="${Number(yy) + 4}" font-size="10" fill="var(--ink-soft)">${f.toFixed(2)}</text>`;
+    }).join("");
+    const marks = pts.map((p) => {
+      const cx = x(p.epsilon), cy = y(p.final_accuracy);
+      return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="var(--acc)"/>
+              <text class="point-lab" x="${cx.toFixed(1)}" y="${(cy - 11).toFixed(1)}" text-anchor="middle">${(p.final_accuracy * 100).toFixed(0)}%</text>
+              <text class="point-lab" x="${cx.toFixed(1)}" y="${(H - pad + 16).toFixed(1)}" text-anchor="middle">ε=${p.epsilon}</text>`;
+    }).join("");
+    $("tradeoff-chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Final accuracy rises as the privacy budget epsilon increases">
+      ${grid}${base.length ? `<polyline points="${base.map((p) => `${x(p.epsilon)},${y(p.final_accuracy)}`).join(" ")}" fill="none" stroke="var(--ink-soft)" stroke-width="2" stroke-dasharray="6 4"/>` : ""}
+      <polyline points="${accPts}" fill="none" stroke="var(--acc)" stroke-width="2.5"/>${marks}
+      <text x="${pad}" y="${H - 8}" font-size="11" fill="var(--ink-soft)">privacy budget ε (log scale) — low ε = strong privacy · high ε = weak privacy</text>
+      <text x="8" y="${pad - 14}" font-size="11" fill="var(--ink-soft)">accuracy</text>
+      ${base.length ? `<text x="${W - pad - 250}" y="${pad - 16}" font-size="11" fill="var(--ink-soft)">dashed: pinned baseline (${pinnedCurve.dp_mechanism || "?"}) · solid: current run</text>` : ""}
+    </svg>`;
+    $("tradeoff-table").innerHTML =
+      `<thead><tr><th>ε (privacy budget)</th><th>Final accuracy</th><th>Final loss</th><th>Noise L2</th><th>Noise scale</th></tr></thead><tbody>` +
+      pts.map((p) => `<tr>
+        <td class="num">${num(p.epsilon, 2)}</td>
+        <td class="num">${num(p.final_accuracy)}</td>
+        <td class="num">${num(p.final_loss, 4)}</td>
+        <td class="num">${num(p.noise_l2_norm)}</td>
+        <td class="num">${num(p.noise_scale, 4)}</td>
+      </tr>`).join("") + `</tbody>`;
+  }
+
+  async function computeTradeoff() {
+    const btn = $("tradeoff-btn");
+    const scope = btn.closest(".panel");
+    const spinner = btn.parentElement.querySelector(".spinner");
+    btn.disabled = true; btn.textContent = "Computing…";
+    if (scope) scope.setAttribute("aria-busy", "true");
+    spinner.hidden = false;
+    $("tradeoff-status").textContent = "Running 6 simulations across ε — takes ~30s.";
+    $("tradeoff-error").hidden = true;
+    try {
+      const res = await fetch("/api/privacy_curve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          dp_mechanism: $("dp_mechanism").value,
+          num_clients: Number($("num_clients").value),
+          num_rounds: 5,
+          local_epochs: Number($("local_epochs").value),
+          learning_rate: Number($("learning_rate").value),
+          alpha: Number($("alpha").value),
+          delta: Number($("delta").value),
+          clip_norm: Number($("clip_norm").value),
+          seed: Number($("seed").value),
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || `Request failed (${res.status})`);
+      lastCurve = payload;
+      $("pin-baseline").disabled = false;
+      renderTradeoff(payload);
+      $("tradeoff-status").textContent = `Done — ${payload.points.length} real runs at ${payload.dp_mechanism}.`;
+    } catch (err) {
+      $("tradeoff-error").textContent = err.message;
+      $("tradeoff-error").hidden = false;
+      $("tradeoff-status").textContent = "";
+    } finally {
+      btn.disabled = false; btn.textContent = "Compute tradeoff curve";
+      if (scope) scope.setAttribute("aria-busy", "false");
+      spinner.hidden = true;
+    }
+  }
+  $("tradeoff-btn").addEventListener("click", computeTradeoff);
+  $("pin-baseline").addEventListener("click", () => {
+    if (!lastCurve) return;
+    pinnedCurve = lastCurve;
+    try { window.localStorage.setItem(BASELINE_KEY, JSON.stringify(lastCurve)); } catch { /* storage unavailable */ }
+    $("clear-baseline").disabled = false;
+    renderTradeoff(lastCurve);
+    $("tradeoff-status").textContent = "Baseline pinned — future runs draw it dashed for comparison.";
+  });
+  $("clear-baseline").addEventListener("click", () => {
+    pinnedCurve = null;
+    try { window.localStorage.removeItem(BASELINE_KEY); } catch { /* storage unavailable */ }
+    $("clear-baseline").disabled = true;
+    if (lastCurve) renderTradeoff(lastCurve);
+    $("tradeoff-status").textContent = "Baseline cleared.";
+  });
+
+  let tradeoffDone = false;
+  $("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = $("run");
+    btn.disabled = true; btn.textContent = "Running…";
+    btn.form.setAttribute("aria-busy", "true");
+    const spinner = document.querySelector(".spinner");
+    spinner.hidden = false;
+    $("error").hidden = true;
+    try {
+      const res = await fetch("/api/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          num_clients: Number($("num_clients").value),
+          num_rounds: Number($("num_rounds").value),
+          local_epochs: Number($("local_epochs").value),
+          learning_rate: Number($("learning_rate").value),
+          alpha: Number($("alpha").value),
+          dp_mechanism: $("dp_mechanism").value,
+          epsilon: Number($("epsilon").value),
+          delta: Number($("delta").value),
+          clip_norm: Number($("clip_norm").value),
+          seed: Number($("seed").value),
+        }),
+      });
+      const payload = await res.json();
+      if (!res.ok) throw new Error(payload.error || `Request failed (${res.status})`);
+      renderSummary(payload);
+      renderChart(payload.rounds);
+      renderRounds(payload.rounds);
+      $("raw").textContent = JSON.stringify(payload, null, 2);
+      $("raw-details").hidden = false;
+    } catch (err) {
+      $("error").textContent = err.message;
+      $("error").hidden = false;
+    } finally {
+      btn.disabled = false; btn.textContent = "Run simulation";
+      btn.form.setAttribute("aria-busy", "false");
+      spinner.hidden = true;
+    }
+    if (!tradeoffDone) { tradeoffDone = true; computeTradeoff(); }
+  });
+
+  $("form").dispatchEvent(new Event("submit"));
+})();
+</script>
+</body>
+</html>
