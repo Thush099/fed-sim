@@ -659,3 +659,60 @@ class TestLabelSkewUtilities:
         set_seed(123)
         assert torch.randn(3).tolist() == a
         assert np.random.rand(3).tolist() == b
+
+
+def test_noise_scale_dp_contracts() -> None:
+    """Noise calibration contracts: the no-noise mode is explicit, invalid deltas and
+    unknown mechanisms are rejected, and formulas match the documented ones."""
+    import math
+
+    from src.privacy import compute_dp_noise_scale
+
+    assert compute_dp_noise_scale("none", 1.0, 1.0, 1e-5) == 0.0
+    for bad_delta in (0.0, 1.0, -0.5, 2.0):
+        with pytest.raises(ValueError, match="delta must be in"):
+            compute_dp_noise_scale("laplace", 1.0, 1.0, bad_delta)
+    with pytest.raises(ValueError, match="Unsupported DP mechanism"):
+        compute_dp_noise_scale("reroute", 1.0, 1.0, 1e-5)
+    assert compute_dp_noise_scale("laplace", 2.0, 4.0, 1e-5) == 0.5
+    assert compute_dp_noise_scale("gaussian", 1.0, 1.0, 1e-5) == pytest.approx(
+        math.sqrt(2.0 * math.log(1.25 / 1e-5))
+    )
+
+
+def test_zero_noise_release_is_an_exact_clone() -> None:
+    """mechanism='none' and a zero sensitivity must release the update UNMODIFIED —
+    these are the only documented zero-noise paths and both are explicit opt-ins."""
+    base = {"w": torch.tensor([1.0, -2.0, 3.5])}
+
+    for mechanism, sensitivity in (("none", 1.0), ("laplace", 0.0)):
+        noisy, scale, norm = add_dp_noise(
+            base, mechanism=mechanism, sensitivity=sensitivity, epsilon=1.0, delta=1e-5,
+        )
+        assert scale == 0.0 and norm == 0.0
+        assert torch.equal(noisy["w"], base["w"]), f"{mechanism} must not alter the update"
+        assert noisy["w"] is not base["w"], "release must be a clone, not the original tensor"
+
+
+def test_accountant_composition_and_delta_slack_contracts() -> None:
+    """Composition accounting: no rounds or mechanism='none' compose to zero, and the
+    gaussian advanced-composition path adds exactly the documented slack delta."""
+    from src.privacy import PrivacyAccountant
+
+    fresh = PrivacyAccountant(mechanism="laplace", epsilon_per_round=0.5)
+    assert fresh.cumulative_epsilon_composed == 0.0
+
+    none_acc = PrivacyAccountant(mechanism="none", epsilon_per_round=0.0)
+    none_acc.step(round_idx=1, sensitivity=1.0, noise_scale=0.0)
+    assert none_acc.cumulative_epsilon_basic == 0.0
+    assert none_acc.cumulative_epsilon_composed == 0.0
+
+    gauss = PrivacyAccountant(
+        mechanism="gaussian", epsilon_per_round=0.1, delta_per_round=1e-6, slack_delta=1e-5,
+    )
+    for i in range(1, 101):
+        gauss.step(round_idx=i, sensitivity=1.0, noise_scale=2.0)
+    assert gauss.cumulative_epsilon_composed < gauss.cumulative_epsilon_basic, (
+        "precondition: the advanced bound must win for the slack path to apply"
+    )
+    assert gauss.cumulative_delta == pytest.approx(min(1.0, 100 * 1e-6 + 1e-5))
